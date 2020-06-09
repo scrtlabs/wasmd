@@ -2,8 +2,9 @@ package keeper
 
 import (
 	"fmt"
-	cosmwasm "github.com/confio/go-cosmwasm"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	cosmwasm "github.com/enigmampc/EnigmaBlockchain/go-cosmwasm"
 )
 
 func humanAddress(canon []byte) (string, error) {

@@ -9,7 +9,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkErrors "github.com/cosmos/cosmos-sdk/types/errors"
-	"github.com/cosmwasm/wasmd/x/wasm/internal/types"
+	"github.com/enigmampc/EnigmaBlockchain/x/compute/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	abci "github.com/tendermint/tendermint/abci/types"
@@ -81,16 +81,6 @@ func TestQueryContractState(t *testing.T) {
 			srcReq:           abci.RequestQuery{Data: []byte{0x0, 0x1}},
 			expModelLen:      1,
 			expModelContains: []types.Model{{Key: []byte{0x0, 0x1}, Value: []byte(`{"count":8}`)}},
-		},
-		"query smart": {
-			srcPath:     []string{QueryGetContractState, addr.String(), QueryMethodContractStateSmart},
-			srcReq:      abci.RequestQuery{Data: []byte(`{"verifier":{}}`)},
-			expSmartRes: anyAddr.String(),
-		},
-		"query smart invalid request": {
-			srcPath: []string{QueryGetContractState, addr.String(), QueryMethodContractStateSmart},
-			srcReq:  abci.RequestQuery{Data: []byte(`{"raw":{"key":"config"}}`)},
-			expErr:  types.ErrQueryFailed,
 		},
 		"query unknown raw key": {
 			srcPath:     []string{QueryGetContractState, addr.String(), QueryMethodContractStateRaw},

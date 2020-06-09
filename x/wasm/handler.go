@@ -1,8 +1,7 @@
-package wasm
+package compute
 
 import (
 	"fmt"
-
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
@@ -19,6 +18,7 @@ func NewHandler(k Keeper) sdk.Handler {
 		ctx = ctx.WithEventManager(sdk.NewEventManager())
 
 		switch msg := msg.(type) {
+
 		case MsgStoreCode:
 			return handleStoreCode(ctx, k, &msg)
 		case *MsgStoreCode:

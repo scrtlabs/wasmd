@@ -1,4 +1,4 @@
-package wasm
+package compute
 
 import (
 	"encoding/json"
@@ -10,16 +10,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	wasmTypes "github.com/confio/go-cosmwasm/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/x/auth"
+	wasmTypes "github.com/enigmampc/EnigmaBlockchain/go-cosmwasm/types"
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/crypto"
 	"github.com/tendermint/tendermint/crypto/ed25519"
 	"github.com/tendermint/tendermint/libs/kv"
 
-	"github.com/cosmwasm/wasmd/x/wasm/internal/keeper"
+	"github.com/enigmampc/EnigmaBlockchain/x/compute/internal/keeper"
 )
 
 type testData struct {
@@ -169,8 +169,8 @@ func TestHandleInstantiate(t *testing.T) {
 	res, err = h(data.ctx, initCmd)
 	require.NoError(t, err)
 	contractAddr := sdk.AccAddress(res.Data)
-	require.Equal(t, "cosmos18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5", contractAddr.String())
-	// this should be standard x/wasm init event, nothing from contract
+	require.Equal(t, "enigma18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5", contractAddr.String())
+	// this should be standard x/compute init event, nothing from contract
 	require.Equal(t, 1, len(res.Events), prettyEvents(res.Events))
 	assert.Equal(t, "message", res.Events[0].Type)
 	assertAttribute(t, "module", "wasm", res.Events[0].Attributes[0])
@@ -224,8 +224,8 @@ func TestHandleExecute(t *testing.T) {
 	res, err = h(data.ctx, initCmd)
 	require.NoError(t, err)
 	contractAddr := sdk.AccAddress(res.Data)
-	require.Equal(t, "cosmos18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5", contractAddr.String())
-	// this should be standard x/wasm init event, plus a bank send event (2), with no custom contract events
+	require.Equal(t, "enigma18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5", contractAddr.String())
+	// this should be standard x/compute init event, plus a bank send event (2), with no custom contract events
 	require.Equal(t, 2, len(res.Events), prettyEvents(res.Events))
 	assert.Equal(t, "transfer", res.Events[0].Type)
 	assert.Equal(t, "message", res.Events[1].Type)
@@ -254,7 +254,7 @@ func TestHandleExecute(t *testing.T) {
 	}
 	res, err = h(data.ctx, execCmd)
 	require.NoError(t, err)
-	// this should be standard x/wasm init event, plus 2 bank send event, plus a special event from the contract
+	// this should be standard x/compute init event, plus 2 bank send event, plus a special event from the contract
 	require.Equal(t, 4, len(res.Events), prettyEvents(res.Events))
 	assert.Equal(t, "transfer", res.Events[0].Type)
 	assertAttribute(t, "recipient", contractAddr.String(), res.Events[0].Attributes[0])
@@ -269,7 +269,7 @@ func TestHandleExecute(t *testing.T) {
 	assertAttribute(t, "recipient", bob.String(), res.Events[2].Attributes[0])
 	assertAttribute(t, "sender", contractAddr.String(), res.Events[2].Attributes[1])
 	assertAttribute(t, "amount", "105000denom", res.Events[2].Attributes[2])
-	// finally, standard x/wasm tag
+	// finally, standard x/compute tag
 	assert.Equal(t, "message", res.Events[3].Type)
 	assertAttribute(t, "module", "wasm", res.Events[3].Attributes[0])
 
@@ -335,7 +335,7 @@ func TestHandleExecuteEscrow(t *testing.T) {
 	res, err = h(data.ctx, initCmd)
 	require.NoError(t, err)
 	contractAddr := sdk.AccAddress(res.Data)
-	require.Equal(t, "cosmos18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5", contractAddr.String())
+	require.Equal(t, "enigma18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5", contractAddr.String())
 
 	handleMsg := map[string]interface{}{
 		"approve": map[string]interface{}{},

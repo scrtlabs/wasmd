@@ -1,17 +1,21 @@
 package types
 
 import (
+	"encoding/base64"
 	"encoding/json"
 
 	tmBytes "github.com/tendermint/tendermint/libs/bytes"
 
-	wasmTypes "github.com/confio/go-cosmwasm/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	auth "github.com/cosmos/cosmos-sdk/x/auth/exported"
+	wasmTypes "github.com/enigmampc/EnigmaBlockchain/go-cosmwasm/types"
 )
 
 const defaultLRUCacheSize = uint64(0)
 const defaultQueryGasLimit = uint64(3000000)
+
+// base64 of a 64 byte key
+type ContractKey string
 
 // Model is a struct that holds a KV pair
 type Model struct {
@@ -95,7 +99,7 @@ func NewContractInfo(codeID uint64, creator sdk.AccAddress, initMsg []byte, labe
 }
 
 // NewParams initializes params for a contract instance
-func NewParams(ctx sdk.Context, creator sdk.AccAddress, deposit sdk.Coins, contractAcct auth.Account) wasmTypes.Env {
+func NewParams(ctx sdk.Context, creator sdk.AccAddress, deposit sdk.Coins, contractAcct auth.Account, contractKey []byte) wasmTypes.Env {
 	return wasmTypes.Env{
 		Block: wasmTypes.BlockInfo{
 			Height:  ctx.BlockHeight(),
@@ -110,6 +114,7 @@ func NewParams(ctx sdk.Context, creator sdk.AccAddress, deposit sdk.Coins, contr
 			Address: wasmTypes.CanonicalAddress(contractAcct.GetAddress()),
 			Balance: NewWasmCoins(contractAcct.GetCoins()),
 		},
+		Key: wasmTypes.ContractKey(base64.StdEncoding.EncodeToString(contractKey)),
 	}
 }
 

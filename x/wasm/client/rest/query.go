@@ -10,8 +10,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/rest"
-	"github.com/cosmwasm/wasmd/x/wasm/internal/keeper"
-	"github.com/cosmwasm/wasmd/x/wasm/internal/types"
+	"github.com/enigmampc/EnigmaBlockchain/x/compute/internal/keeper"
+	"github.com/enigmampc/EnigmaBlockchain/x/compute/internal/types"
 
 	"github.com/cosmos/cosmos-sdk/client/context"
 	"github.com/gorilla/mux"
@@ -217,6 +217,12 @@ func queryContractStateSmartHandlerFn(cliCtx context.CLIContext) http.HandlerFun
 			rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		queryData, err = base64.StdEncoding.DecodeString(string(queryData))
+		if err != nil {
+			rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
 		res, height, err := cliCtx.QueryWithData(route, queryData)
 		if err != nil {
 			rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
