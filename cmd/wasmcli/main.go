@@ -20,34 +20,28 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-
 	"github.com/tendermint/go-amino"
 	"github.com/tendermint/tendermint/libs/cli"
 
-	"github.com/cosmwasm/wasmd/app"
+	app "github.com/enigmampc/EnigmaBlockchain"
+	eng "github.com/enigmampc/EnigmaBlockchain/types"
 )
 
 func main() {
-	// Configure cobra to sort commands
 	cobra.EnableCommandSorting = false
 
-	// Instantiate the codec for the command line application
 	cdc := app.MakeCodec()
 
 	// Read in the configuration file for the sdk
 	config := sdk.GetConfig()
-	config.SetBech32PrefixForAccount(sdk.Bech32PrefixAccAddr, sdk.Bech32PrefixAccPub)
-	config.SetBech32PrefixForValidator(sdk.Bech32PrefixValAddr, sdk.Bech32PrefixValPub)
-	config.SetBech32PrefixForConsensusNode(sdk.Bech32PrefixConsAddr, sdk.Bech32PrefixConsPub)
+	config.SetBech32PrefixForAccount(eng.Bech32PrefixAccAddr, eng.Bech32PrefixAccPub)
+	config.SetBech32PrefixForValidator(eng.Bech32PrefixValAddr, eng.Bech32PrefixValPub)
+	config.SetBech32PrefixForConsensusNode(eng.Bech32PrefixConsAddr, eng.Bech32PrefixConsPub)
 	config.Seal()
 
-	// TODO: setup keybase, viper object, etc. to be passed into
-	// the below functions and eliminate global vars, like we do
-	// with the cdc
-
 	rootCmd := &cobra.Command{
-		Use:   "wasmcli",
-		Short: "Command line interface for interacting with wasmd",
+		Use:   "enigmacli",
+		Short: "EnigmaChain Client",
 	}
 
 	// Add --chain-id to persistent flags and mark it required
@@ -71,8 +65,8 @@ func main() {
 		flags.NewCompletionCmd(rootCmd, true),
 	)
 
-	// Add flags and prefix all env exposed with WM
-	executor := cli.PrepareMainCmd(rootCmd, "WM", app.DefaultCLIHome)
+	// Add flags and prefix all env exposed with EN
+	executor := cli.PrepareMainCmd(rootCmd, "EN", app.DefaultCLIHome)
 
 	err := executor.Execute()
 	if err != nil {
@@ -94,7 +88,7 @@ func queryCmd(cdc *amino.Codec) *cobra.Command {
 		rpc.ValidatorCommand(cdc),
 		rpc.BlockCommand(),
 		authcmd.QueryTxsByEventsCmd(cdc),
-		authcmd.QueryTxCmd(cdc),
+		authcmd.QueryTxCmd(cdc), // TODO add another one like this that decrypts the output if it's from the wallet that sent the tx
 		flags.LineBreak,
 	)
 
@@ -119,8 +113,6 @@ func txCmd(cdc *amino.Codec) *cobra.Command {
 		authcmd.GetBroadcastCommand(cdc),
 		authcmd.GetEncodeCommand(cdc),
 		authcmd.GetDecodeCommand(cdc),
-		// TODO: I think it is safe to remove
-		// authcmd.GetDecodeTxCmd(cdc),
 		flags.LineBreak,
 	)
 
