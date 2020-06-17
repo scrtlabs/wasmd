@@ -89,11 +89,6 @@ func (k Keeper) Create(ctx sdk.Context, creator sdk.AccAddress, wasmCode []byte,
 	return codeID, nil
 }
 
-// returns true when simulation mode used by gas=auto queries
-func isSimulationMode(ctx sdk.Context) bool {
-	return ctx.GasMeter().Limit() == 0 && ctx.BlockHeight() != 0
-}
-
 // Instantiate creates an instance of a WASM contract
 func (k Keeper) Instantiate(ctx sdk.Context, codeID uint64, creator, admin sdk.AccAddress, initMsg []byte, label string, deposit sdk.Coins) (sdk.AccAddress, error) {
 	// create contract address
@@ -247,7 +242,7 @@ func (k Keeper) Migrate(ctx sdk.Context, contractAddress sdk.AccAddress, caller 
 	prefixStoreKey := types.GetContractStorePrefixKey(contractAddress)
 	prefixStore := prefix.NewStore(ctx.KVStore(k.storeKey), prefixStoreKey)
 	gas := gasForContract(ctx)
-	res, gasUsed, err := k.wasmer.Migrate(newCodeInfo.CodeHash, params, msg, prefixStore, cosmwasmAPI, querier, ctx.GasMeter(), gas)
+	res, gasUsed, err := k.wasmer.Migrate(newCodeInfo.CodeHash, params, msg, &prefixStore, cosmwasmAPI, &querier, ctx.GasMeter(), gas)
 	consumeGas(ctx, gasUsed)
 	if err != nil {
 		return nil, sdkerrors.Wrap(types.ErrMigrationFailed, err.Error())
@@ -259,13 +254,30 @@ func (k Keeper) Migrate(ctx sdk.Context, contractAddress sdk.AccAddress, caller 
 	value.Events = nil
 
 	contractInfo.UpdateCodeID(ctx, newCodeID)
-	k.setContractInfo(ctx, contractAddress, *contractInfo)
+	k.setContractInfo(ctx, contractAddress, contractInfo)
 
 	if err := k.dispatchMessages(ctx, contractAddress, res.Messages); err != nil {
 		return nil, sdkerrors.Wrap(err, "dispatch")
 	}
 
 	return &value, nil
+}
+
+// UpdateContractAdmin sets the admin value on the ContractInfo. New admin can be nil to disable further migrations/ updates.
+func (k Keeper) UpdateContractAdmin(ctx sdk.Context, contractAddress sdk.AccAddress, caller sdk.AccAddress, newAdmin sdk.AccAddress) error {
+	contractInfo := k.GetContractInfo(ctx, contractAddress)
+	if contractInfo == nil {
+		return sdkerrors.Wrap(sdkerrors.ErrInvalidRequest, "unknown contract")
+	}
+	if contractInfo.Admin == nil {
+		return sdkerrors.Wrap(sdkerrors.ErrUnauthorized, "migration not supported by this contract")
+	}
+	if !contractInfo.Admin.Equals(caller) {
+		return sdkerrors.Wrap(sdkerrors.ErrUnauthorized, "no permission")
+	}
+	contractInfo.Admin = newAdmin
+	k.setContractInfo(ctx, contractAddress, contractInfo)
+	return nil
 }
 
 // QuerySmart queries the smart contract itself.
@@ -345,7 +357,7 @@ func (k Keeper) GetContractInfo(ctx sdk.Context, contractAddress sdk.AccAddress)
 	return &contract
 }
 
-func (k Keeper) setContractInfo(ctx sdk.Context, contractAddress sdk.AccAddress, contract types.ContractInfo) {
+func (k Keeper) setContractInfo(ctx sdk.Context, contractAddress sdk.AccAddress, contract *types.ContractInfo) {
 	store := ctx.KVStore(k.storeKey)
 	store.Set(types.GetContractAddressKey(contractAddress), k.cdc.MustMarshalBinaryBare(contract))
 }
@@ -373,7 +385,10 @@ func (k Keeper) setContractState(ctx sdk.Context, contractAddress sdk.AccAddress
 	prefixStoreKey := types.GetContractStorePrefixKey(contractAddress)
 	prefixStore := prefix.NewStore(ctx.KVStore(k.storeKey), prefixStoreKey)
 	for _, model := range models {
-		prefixStore.Set([]byte(model.Key), []byte(model.Value))
+		if model.Value == nil {
+			model.Value = []byte{}
+		}
+		prefixStore.Set(model.Key, model.Value)
 	}
 }
 

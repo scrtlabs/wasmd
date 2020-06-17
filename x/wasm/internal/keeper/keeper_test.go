@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"io/ioutil"
@@ -306,7 +307,7 @@ func TestExecute(t *testing.T) {
 
 	// make sure gas is properly deducted from ctx
 	gasAfter := ctx.GasMeter().GasConsumed()
-	require.Equal(t, uint64(0x7fa1), gasAfter-gasBefore)
+	require.Equal(t, uint64(0x7f9e), gasAfter-gasBefore)
 
 	// ensure bob now exists and got both payments released
 	bobAcct = accKeeper.GetAccount(ctx, bob)
@@ -319,7 +320,7 @@ func TestExecute(t *testing.T) {
 	require.NotNil(t, contractAcct)
 	assert.Equal(t, sdk.Coins(nil), contractAcct.GetCoins())
 
-	t.Logf("Duration: %v (31728 gas)\n", diff)
+	t.Logf("Duration: %v (%d gas)\n", diff, gasAfter-gasBefore)
 }
 
 func TestExecuteWithNonExistingAddress(t *testing.T) {
@@ -472,9 +473,8 @@ func TestMigrate(t *testing.T) {
 	accKeeper, keeper := keepers.AccountKeeper, keepers.WasmKeeper
 
 	deposit := sdk.NewCoins(sdk.NewInt64Coin("denom", 100000))
-	topUp := sdk.NewCoins(sdk.NewInt64Coin("denom", 5000))
 	creator := createFakeFundedAccount(ctx, accKeeper, deposit.Add(deposit...))
-	fred := createFakeFundedAccount(ctx, accKeeper, topUp)
+	fred := createFakeFundedAccount(ctx, accKeeper, sdk.NewCoins(sdk.NewInt64Coin("denom", 5000)))
 
 	wasmCode, err := ioutil.ReadFile("./testdata/contract.wasm")
 	require.NoError(t, err)
@@ -486,12 +486,20 @@ func TestMigrate(t *testing.T) {
 	require.NotEqual(t, originalContractID, newContractID)
 
 	_, _, anyAddr := keyPubAddr()
+	_, _, newVerifierAddr := keyPubAddr()
 	initMsg := InitMsg{
 		Verifier:    fred,
 		Beneficiary: anyAddr,
 	}
 	initMsgBz, err := json.Marshal(initMsg)
 	require.NoError(t, err)
+
+	migMsg := struct {
+		Verifier sdk.AccAddress `json:"verifier"`
+	}{Verifier: newVerifierAddr}
+	migMsgBz, err := json.Marshal(migMsg)
+	require.NoError(t, err)
+
 	specs := map[string]struct {
 		admin                sdk.AccAddress
 		overrideContractAddr sdk.AccAddress
@@ -499,28 +507,35 @@ func TestMigrate(t *testing.T) {
 		codeID               uint64
 		migrateMsg           []byte
 		expErr               *sdkerrors.Error
+		expVerifier          sdk.AccAddress
 	}{
 		"all good with same code id": {
-			admin:  creator,
-			caller: creator,
-			codeID: originalContractID,
+			admin:       creator,
+			caller:      creator,
+			codeID:      originalContractID,
+			migrateMsg:  migMsgBz,
+			expVerifier: newVerifierAddr,
 		},
-		"all good with new code id": {
-			admin:  creator,
-			caller: creator,
-			codeID: newContractID,
+		"all good with different code id": {
+			admin:       creator,
+			caller:      creator,
+			codeID:      newContractID,
+			migrateMsg:  migMsgBz,
+			expVerifier: newVerifierAddr,
 		},
 		"all good with admin set": {
-			admin:  fred,
-			caller: fred,
-			codeID: newContractID,
+			admin:       fred,
+			caller:      fred,
+			codeID:      newContractID,
+			migrateMsg:  migMsgBz,
+			expVerifier: newVerifierAddr,
 		},
 		"prevent migration when admin was not set on instantiate": {
 			caller: creator,
 			codeID: originalContractID,
 			expErr: sdkerrors.ErrUnauthorized,
 		},
-		"prevent migration when not admin": {
+		"prevent migration when not sent by admin": {
 			caller: creator,
 			admin:  fred,
 			codeID: originalContractID,
@@ -539,18 +554,21 @@ func TestMigrate(t *testing.T) {
 			codeID:               originalContractID,
 			expErr:               sdkerrors.ErrInvalidRequest,
 		},
-		"fail when migration caused error": {
+		"fail in contract with invalid migrate msg": {
 			admin:      creator,
 			caller:     creator,
 			codeID:     originalContractID,
-			migrateMsg: bytes.Repeat([]byte{0x1}, 7), // condition hard coded in stub: >6 = error
+			migrateMsg: bytes.Repeat([]byte{0x1}, 7),
 			expErr:     types.ErrMigrationFailed,
 		},
+		"fail in contract without migrate msg": {
+			admin:  creator,
+			caller: creator,
+			codeID: originalContractID,
+			expErr: types.ErrMigrationFailed,
+		},
 	}
-	var (
-		builtIntoGoCosmWasmStubGas  = sdk.Gas(10000)
-		builtIntoGoCosmWasmStubData = []byte(("my-migration-response-data"))
-	)
+
 	for msg, spec := range specs {
 		t.Run(msg, func(t *testing.T) {
 			ctx = ctx.WithBlockHeight(ctx.BlockHeight() + 1)
@@ -559,22 +577,215 @@ func TestMigrate(t *testing.T) {
 			if spec.overrideContractAddr != nil {
 				addr = spec.overrideContractAddr
 			}
-			gasBefore := ctx.GasMeter().GasConsumed()
-			res, err := keeper.Migrate(ctx, addr, spec.caller, spec.codeID, spec.migrateMsg)
+			_, err = keeper.Migrate(ctx, addr, spec.caller, spec.codeID, spec.migrateMsg)
 			require.True(t, spec.expErr.Is(err), "expected %v but got %+v", spec.expErr, err)
 			if spec.expErr != nil {
 				return
 			}
-			gasAfter := ctx.GasMeter().GasConsumed()
-			assert.Greater(t, gasAfter-gasBefore, builtIntoGoCosmWasmStubGas/GasMultiplier)
-			assert.Equal(t, builtIntoGoCosmWasmStubData, res.Data)
 			cInfo := keeper.GetContractInfo(ctx, addr)
 			assert.Equal(t, spec.codeID, cInfo.CodeID)
 			assert.Equal(t, originalContractID, cInfo.PreviousCodeID)
 			assert.Equal(t, types.NewCreatedAt(ctx), cInfo.LastUpdated)
-			// TODO: check contract store was updated by migration code (impl also in contract)
-			// TODO: check any messages dispatched proper
-			// TODO: check events?
+
+			m := keeper.QueryRaw(ctx, addr, []byte("config"))
+			require.Len(t, m, 1)
+			var stored map[string][]byte
+			require.NoError(t, json.Unmarshal(m[0].Value, &stored))
+			require.Contains(t, stored, "verifier")
+			require.NoError(t, err)
+			assert.Equal(t, spec.expVerifier, sdk.AccAddress(stored["verifier"]))
+		})
+	}
+}
+
+func TestMigrateWithDispatchedMessage(t *testing.T) {
+	tempDir, err := ioutil.TempDir("", "wasm")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	ctx, keepers := CreateTestInput(t, false, tempDir, SupportedFeatures, nil, nil)
+	accKeeper, keeper := keepers.AccountKeeper, keepers.WasmKeeper
+
+	deposit := sdk.NewCoins(sdk.NewInt64Coin("denom", 100000))
+	creator := createFakeFundedAccount(ctx, accKeeper, deposit.Add(deposit...))
+	fred := createFakeFundedAccount(ctx, accKeeper, sdk.NewCoins(sdk.NewInt64Coin("denom", 5000)))
+
+	wasmCode, err := ioutil.ReadFile("./testdata/contract.wasm")
+	require.NoError(t, err)
+	burnerCode, err := ioutil.ReadFile("./testdata/burner.wasm")
+	require.NoError(t, err)
+
+	originalContractID, err := keeper.Create(ctx, creator, wasmCode, "", "")
+	require.NoError(t, err)
+	burnerContractID, err := keeper.Create(ctx, creator, burnerCode, "", "")
+	require.NoError(t, err)
+	require.NotEqual(t, originalContractID, burnerContractID)
+
+	_, _, myPayoutAddr := keyPubAddr()
+	initMsg := InitMsg{
+		Verifier:    fred,
+		Beneficiary: fred,
+	}
+	initMsgBz, err := json.Marshal(initMsg)
+	require.NoError(t, err)
+
+	ctx = ctx.WithBlockHeight(ctx.BlockHeight() + 1)
+	contractAddr, err := keeper.Instantiate(ctx, originalContractID, creator, fred, initMsgBz, "demo contract", deposit)
+	require.NoError(t, err)
+
+	migMsg := struct {
+		Payout sdk.AccAddress `json:"payout"`
+	}{Payout: myPayoutAddr}
+	migMsgBz, err := json.Marshal(migMsg)
+	require.NoError(t, err)
+	ctx = ctx.WithEventManager(sdk.NewEventManager()).WithBlockHeight(ctx.BlockHeight() + 1)
+	res, err := keeper.Migrate(ctx, contractAddr, fred, burnerContractID, migMsgBz)
+	require.NoError(t, err)
+	dataBz, err := base64.StdEncoding.DecodeString(string(res.Data))
+	require.NoError(t, err)
+	assert.Equal(t, "burnt", string(dataBz))
+	assert.Equal(t, "", res.Log)
+	type dict map[string]interface{}
+	expEvents := []dict{
+		{
+			"Type": "wasm",
+			"Attr": []dict{
+				{"contract_address": contractAddr},
+				{"action": "burn"},
+				{"payout": myPayoutAddr},
+			},
+		},
+		{
+			"Type": "transfer",
+			"Attr": []dict{
+				{"recipient": myPayoutAddr},
+				{"sender": contractAddr},
+				{"amount": "100000denom"},
+			},
+		},
+		{
+			"Type": "message",
+			"Attr": []dict{
+				{"sender": contractAddr},
+			},
+		},
+		{
+			"Type": "message",
+			"Attr": []dict{
+				{"module": "bank"},
+			},
+		},
+	}
+	expJsonEvts := string(mustMarshal(t, expEvents))
+	assert.JSONEq(t, expJsonEvts, prettyEvents(t, ctx.EventManager().Events()))
+
+	// all persistent data cleared
+	m := keeper.QueryRaw(ctx, contractAddr, []byte("config"))
+	require.Len(t, m, 0)
+
+	// and all deposit tokens sent to myPayoutAddr
+	balance := accKeeper.GetAccount(ctx, myPayoutAddr).GetCoins()
+	assert.Equal(t, deposit, balance)
+}
+
+func prettyEvents(t *testing.T, events sdk.Events) string {
+	t.Helper()
+	type prettyEvent struct {
+		Type string
+		Attr []map[string]string
+	}
+
+	r := make([]prettyEvent, len(events))
+	for i, e := range events {
+		attr := make([]map[string]string, len(e.Attributes))
+		for j, a := range e.Attributes {
+			attr[j] = map[string]string{string(a.Key): string(a.Value)}
+		}
+		r[i] = prettyEvent{Type: e.Type, Attr: attr}
+	}
+	return string(mustMarshal(t, r))
+}
+
+func mustMarshal(t *testing.T, r interface{}) []byte {
+	t.Helper()
+	bz, err := json.Marshal(r)
+	require.NoError(t, err)
+	return bz
+}
+
+func TestUpdateContractAdmin(t *testing.T) {
+	tempDir, err := ioutil.TempDir("", "wasm")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	ctx, keepers := CreateTestInput(t, false, tempDir, SupportedFeatures, nil, nil)
+	accKeeper, keeper := keepers.AccountKeeper, keepers.WasmKeeper
+
+	deposit := sdk.NewCoins(sdk.NewInt64Coin("denom", 100000))
+	topUp := sdk.NewCoins(sdk.NewInt64Coin("denom", 5000))
+	creator := createFakeFundedAccount(ctx, accKeeper, deposit.Add(deposit...))
+	fred := createFakeFundedAccount(ctx, accKeeper, topUp)
+
+	wasmCode, err := ioutil.ReadFile("./testdata/contract.wasm")
+	require.NoError(t, err)
+
+	originalContractID, err := keeper.Create(ctx, creator, wasmCode, "", "")
+	require.NoError(t, err)
+
+	_, _, anyAddr := keyPubAddr()
+	initMsg := InitMsg{
+		Verifier:    fred,
+		Beneficiary: anyAddr,
+	}
+	initMsgBz, err := json.Marshal(initMsg)
+	require.NoError(t, err)
+	specs := map[string]struct {
+		instAdmin            sdk.AccAddress
+		newAdmin             sdk.AccAddress
+		overrideContractAddr sdk.AccAddress
+		caller               sdk.AccAddress
+		expErr               *sdkerrors.Error
+	}{
+		"all good with admin set": {
+			instAdmin: fred,
+			newAdmin:  anyAddr,
+			caller:    fred,
+		},
+		"all good with new admin empty": {
+			instAdmin: fred,
+			newAdmin:  nil,
+			caller:    fred,
+		},
+		"prevent update when admin was not set on instantiate": {
+			caller:   creator,
+			newAdmin: fred,
+			expErr:   sdkerrors.ErrUnauthorized,
+		},
+		"prevent updates from non admin address": {
+			instAdmin: creator,
+			newAdmin:  fred,
+			caller:    fred,
+			expErr:    sdkerrors.ErrUnauthorized,
+		},
+		"fail with non existing contract addr": {
+			instAdmin:            creator,
+			caller:               creator,
+			overrideContractAddr: anyAddr,
+			expErr:               sdkerrors.ErrInvalidRequest,
+		},
+	}
+	for msg, spec := range specs {
+		t.Run(msg, func(t *testing.T) {
+			addr, err := keeper.Instantiate(ctx, originalContractID, creator, spec.instAdmin, initMsgBz, "demo contract", nil)
+			require.NoError(t, err)
+			if spec.overrideContractAddr != nil {
+				addr = spec.overrideContractAddr
+			}
+			err = keeper.UpdateContractAdmin(ctx, addr, spec.caller, spec.newAdmin)
+			require.True(t, spec.expErr.Is(err), "expected %v but got %+v", spec.expErr, err)
+			if spec.expErr != nil {
+				return
+			}
+			cInfo := keeper.GetContractInfo(ctx, addr)
+			assert.Equal(t, spec.newAdmin, cInfo.Admin)
 		})
 	}
 }
