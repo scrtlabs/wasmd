@@ -10,7 +10,6 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkErrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/enigmampc/EnigmaBlockchain/x/compute/internal/types"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	abci "github.com/tendermint/tendermint/abci/types"
 )
@@ -39,6 +38,9 @@ func TestQueryContractState(t *testing.T) {
 		Beneficiary: bob,
 	}
 	initMsgBz, err := json.Marshal(initMsg)
+	require.NoError(t, err)
+
+	initMsgBz, err = wasmCtx.Encrypt(initMsgBz)
 	require.NoError(t, err)
 
 	addr, err := keeper.Instantiate(ctx, contractID, creator, nil, initMsgBz, "demo contract to query", deposit)
@@ -138,7 +140,7 @@ func TestQueryContractState(t *testing.T) {
 			require.Len(t, r, spec.expModelLen)
 			// and in result set
 			for _, v := range spec.expModelContains {
-				assert.Contains(t, r, v)
+				require.Contains(t, r, v)
 			}
 		})
 	}
@@ -168,6 +170,9 @@ func TestListContractByCodeOrdering(t *testing.T) {
 		Beneficiary: bob,
 	}
 	initMsgBz, err := json.Marshal(initMsg)
+	require.NoError(t, err)
+
+	initMsgBz, err = wasmCtx.Encrypt(initMsgBz)
 	require.NoError(t, err)
 
 	// manage some realistic block settings
@@ -205,10 +210,10 @@ func TestListContractByCodeOrdering(t *testing.T) {
 	require.Equal(t, 10, len(contracts))
 
 	for i, contract := range contracts {
-		assert.Equal(t, fmt.Sprintf("contract %d", i), contract.Label)
-		assert.NotEmpty(t, contract.Address)
+		require.Equal(t, fmt.Sprintf("contract %d", i), contract.Label)
+		require.NotEmpty(t, contract.Address)
 		// ensure these are not shown
-		assert.Nil(t, contract.InitMsg)
-		assert.Nil(t, contract.Created)
+		require.Nil(t, contract.InitMsg)
+		require.Nil(t, contract.Created)
 	}
 }

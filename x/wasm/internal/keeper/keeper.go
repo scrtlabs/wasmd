@@ -3,6 +3,7 @@ package keeper
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 
@@ -190,26 +191,32 @@ func (k Keeper) Execute(ctx sdk.Context, contractAddress sdk.AccAddress, caller 
 	}
 
 	gas := gasForContract(ctx)
-	encryptedOutput, gasUsed, execErr := k.wasmer.Execute(codeInfo.CodeHash, params, msg, prefixStore, cosmwasmAPI, querier, ctx.GasMeter(), gas)
+	res, gasUsed, execErr := k.wasmer.Execute(codeInfo.CodeHash, params, msg, prefixStore, cosmwasmAPI, querier, ctx.GasMeter(), gas)
 	consumeGas(ctx, gasUsed)
 
 	if execErr != nil {
 		return sdk.Result{}, sdkerrors.Wrap(types.ErrExecuteFailed, execErr.Error())
 	}
 
-	// // emit all events from this contract itself
-	// value := types.CosmosResult(*encryptedOutput, contractAddress)
-	// ctx.EventManager().EmitEvents(value.Events)
-	// value.Events = nil
+	consumeGas(ctx, gasUsed)
+	var result wasmTypes.CosmosResponse
+	err = json.Unmarshal(res, &result)
+	if err != nil {
+		return sdk.Result{}, err
+	}
 
-	// // TODO: capture events here as well
-	// err = k.dispatchMessages(ctx, contractAddress, encryptedOutput.Messages)
-	// if err != nil {
-	// 	return sdk.Result{}, err
-	// }
+	// emit all events from this contract itself
+	value := types.CosmosResult(result.Ok, contractAddress)
+	ctx.EventManager().EmitEvents(value.Events)
+
+	// TODO: capture events here as well
+	err = k.dispatchMessages(ctx, contractAccount, result.Ok.Messages)
+	if err != nil {
+		return sdk.Result{}, err
+	}
 
 	return sdk.Result{
-		Data: encryptedOutput,
+		Data: res,
 	}, nil
 }
 

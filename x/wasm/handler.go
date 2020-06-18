@@ -2,6 +2,7 @@ package compute
 
 import (
 	"fmt"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
@@ -104,6 +105,10 @@ func handleInstantiate(ctx sdk.Context, k Keeper, msg *MsgInstantiateContract) (
 		sdk.NewAttribute(AttributeKeyContract, contractAddr.String()),
 	)
 
+	// TODO Assaf:
+	// also need to parse here output events and pass them to Tendermint
+	// but k.Instantiate() doesn't return any output data right now, just contractAddr
+
 	return &sdk.Result{
 		Data:   contractAddr,
 		Events: append(events, ourEvent),
@@ -125,6 +130,7 @@ func handleExecute(ctx sdk.Context, k Keeper, msg *MsgExecuteContract) (*sdk.Res
 	)
 
 	res.Events = append(events, ourEvent)
+
 	return &res, nil
 }
 

@@ -5,25 +5,35 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"testing"
 
 	stypes "github.com/cosmos/cosmos-sdk/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/cosmos/cosmos-sdk/x/auth"
+	"github.com/enigmampc/EnigmaBlockchain/go-cosmwasm/api"
 	eng "github.com/enigmampc/EnigmaBlockchain/types"
 	"github.com/enigmampc/EnigmaBlockchain/x/compute/internal/types"
-	"github.com/enigmampc/EnigmaBlockchain/x/wasm/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/crypto"
 	"github.com/tendermint/tendermint/crypto/ed25519"
+
+	wasmUtils "github.com/enigmampc/EnigmaBlockchain/x/compute/client/utils"
+	reg "github.com/enigmampc/EnigmaBlockchain/x/registration"
 )
 
 const SupportedFeatures = "staking"
+
+var wasmCtx = wasmUtils.WASMContext{
+	TestKeyPairPath:  "/tmp/id_tx_io.json",
+	TestMasterIOCert: nil,
+}
 
 func init() {
 	config := sdk.GetConfig()
@@ -31,6 +41,16 @@ func init() {
 	config.SetBech32PrefixForValidator(eng.Bech32PrefixValAddr, eng.Bech32PrefixValPub)
 	config.SetBech32PrefixForConsensusNode(eng.Bech32PrefixConsAddr, eng.Bech32PrefixConsPub)
 	config.Seal()
+
+	_, err := api.InitBootstrap()
+	if err != nil {
+		panic(fmt.Sprintf("Error initializing the enclave: %v", err))
+	}
+
+	wasmCtx.TestMasterIOCert, err = ioutil.ReadFile(filepath.Join(".", reg.IoExchMasterCertPath))
+	if err != nil {
+		panic(fmt.Sprintf("Error reading 'io-master-cert.der': %v", err))
+	}
 }
 
 func TestNewKeeper(t *testing.T) {
@@ -149,7 +169,7 @@ func TestIsSimulationMode(t *testing.T) {
 	}
 	for msg, _ := range specs {
 		t.Run(msg, func(t *testing.T) {
-			//assert.Equal(t, spec.exp, isSimulationMode(spec.ctx))
+			//require.Equal(t, spec.exp, isSimulationMode(spec.ctx))
 		})
 	}
 }
@@ -204,6 +224,9 @@ func TestInstantiate(t *testing.T) {
 	initMsgBz, err := json.Marshal(initMsg)
 	require.NoError(t, err)
 
+	initMsgBz, err = wasmCtx.Encrypt(initMsgBz)
+	require.NoError(t, err)
+
 	gasBefore := ctx.GasMeter().GasConsumed()
 
 	// create with no balance is also legal
@@ -212,15 +235,15 @@ func TestInstantiate(t *testing.T) {
 	require.Equal(t, "enigma18vd8fpwxzck93qlwghaj6arh4p7c5n89d2p9uk", addr.String())
 
 	gasAfter := ctx.GasMeter().GasConsumed()
-	require.Equal(t, uint64(25439), gasAfter-gasBefore)
+	require.Equal(t, uint64(33765), gasAfter-gasBefore)
 
 	// ensure it is stored properly
 	info := keeper.GetContractInfo(ctx, addr)
 	require.NotNil(t, info)
-	assert.Equal(t, info.Creator, creator)
-	assert.Equal(t, info.CodeID, contractID)
-	assert.Equal(t, info.InitMsg, json.RawMessage(initMsgBz))
-	assert.Equal(t, info.Label, "demo contract 1")
+	require.Equal(t, info.Creator, creator)
+	require.Equal(t, info.CodeID, contractID)
+	require.Equal(t, info.InitMsg, json.RawMessage(initMsgBz))
+	require.Equal(t, info.Label, "demo contract 1")
 }
 
 func TestInstantiateWithNonExistingCodeID(t *testing.T) {
@@ -365,11 +388,17 @@ func TestExecuteWithPanic(t *testing.T) {
 	initMsgBz, err := json.Marshal(initMsg)
 	require.NoError(t, err)
 
+	initMsgBz, err = wasmCtx.Encrypt(initMsgBz)
+	require.NoError(t, err)
+
 	addr, err := keeper.Instantiate(ctx, contractID, creator, nil, initMsgBz, "demo contract 4", deposit)
 	require.NoError(t, err)
 
+	execMsgBz, err := wasmCtx.Encrypt([]byte(`{"panic":{}}`))
+	require.NoError(t, err)
+
 	// let's make sure we get a reasonable error, no panic/crash
-	_, err = keeper.Execute(ctx, addr, fred, []byte(`{"panic":{}}`), topUp)
+	_, err = keeper.Execute(ctx, addr, fred, execMsgBz, topUp)
 	require.Error(t, err)
 }
 
@@ -399,6 +428,9 @@ func TestExecuteWithCpuLoop(t *testing.T) {
 	initMsgBz, err := json.Marshal(initMsg)
 	require.NoError(t, err)
 
+	initMsgBz, err = wasmCtx.Encrypt(initMsgBz)
+	require.NoError(t, err)
+
 	addr, err := keeper.Instantiate(ctx, contractID, creator, nil, initMsgBz, "demo contract 5", deposit)
 	require.NoError(t, err)
 
@@ -407,8 +439,11 @@ func TestExecuteWithCpuLoop(t *testing.T) {
 	ctx = ctx.WithGasMeter(sdk.NewGasMeter(gasLimit))
 	require.Equal(t, uint64(0), ctx.GasMeter().GasConsumed())
 
+	execMsgBz, err := wasmCtx.Encrypt([]byte(`{"cpu_loop":{}}`))
+	require.NoError(t, err)
+
 	// this must fail
-	_, err = keeper.Execute(ctx, addr, fred, []byte(`{"cpu_loop":{}}`), nil)
+	_, err = keeper.Execute(ctx, addr, fred, execMsgBz, nil)
 	assert.Error(t, err)
 	// make sure gas ran out
 	// TODO: wasmer doesn't return gas used on error. we should consume it (for error on metering failure)
