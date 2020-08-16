@@ -5,17 +5,22 @@ import (
 	"compress/gzip"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"path"
+	"strings"
 
-	"github.com/cosmos/cosmos-sdk/client/context"
-	regtypes "github.com/enigmampc/EnigmaBlockchain/x/registration"
-	ra "github.com/enigmampc/EnigmaBlockchain/x/registration/remote_attestation"
+	cosmwasmTypes "github.com/enigmampc/SecretNetwork/go-cosmwasm/types"
+	regtypes "github.com/enigmampc/SecretNetwork/x/registration"
+	ra "github.com/enigmampc/SecretNetwork/x/registration/remote_attestation"
+
+	"github.com/enigmampc/cosmos-sdk/client/context"
 	"github.com/miscreant/miscreant.go"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/hkdf"
@@ -53,7 +58,7 @@ func GzipIt(input []byte) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// WASMContext wraps github.com/cosmos/cosmos-sdk/client/context.CLIContext
+// WASMContext wraps github.com/enigmampc/cosmos-sdk/client/context.CLIContext
 type WASMContext struct {
 	CLIContext       context.CLIContext
 	TestKeyPairPath  string
@@ -150,9 +155,11 @@ func (ctx WASMContext) getConsensusIoPubKey() ([]byte, error) {
 	return ioPubkey, nil
 }
 
+
 func (ctx WASMContext) getTxEncryptionKey(txSenderPrivKey []byte, nonce []byte) ([]byte, error) {
 	consensusIoPubKeyBytes, err := ctx.getConsensusIoPubKey()
 	if err != nil {
+		fmt.Println("Failed to get IO key. Make sure the CLI and the node you are targeting are operating in the same SGX mode")
 		return nil, err
 	}
 
@@ -168,12 +175,46 @@ func (ctx WASMContext) getTxEncryptionKey(txSenderPrivKey []byte, nonce []byte) 
 	return txEncryptionKey, nil
 }
 
+func (ctx WASMContext) OfflineEncrypt(plaintext []byte, pathToMasterIoKey string) ([]byte, error) {
+	// parse coins trying to be sent
+	cert, err := ioutil.ReadFile(pathToMasterIoKey)
+	if err != nil {
+		return nil, err
+	}
+
+	pubkey, err := ra.VerifyRaCert(cert)
+	if err != nil {
+		return nil, err
+	}
+
+	txSenderPrivKey, txSenderPubKey, err := ctx.GetTxSenderKeyPair()
+
+	nonce := make([]byte, 32)
+	_, err = rand.Read(nonce)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+
+	txEncryptionKey, err := GetTxEncryptionKeyOffline(pubkey, txSenderPrivKey, nonce)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+
+	return encryptData(txEncryptionKey, txSenderPubKey, plaintext, nonce)
+}
+
 // Encrypt encrypts
 func (ctx WASMContext) Encrypt(plaintext []byte) ([]byte, error) {
 	txSenderPrivKey, txSenderPubKey, err := ctx.GetTxSenderKeyPair()
 
 	nonce := make([]byte, 32)
-	_, _ = rand.Read(nonce)
+	_, err = rand.Read(nonce)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
 
 	txEncryptionKey, err := ctx.getTxEncryptionKey(txSenderPrivKey, nonce)
 	if err != nil {
@@ -181,7 +222,55 @@ func (ctx WASMContext) Encrypt(plaintext []byte) ([]byte, error) {
 		return nil, err
 	}
 
+	return encryptData(txEncryptionKey, txSenderPubKey, plaintext, nonce)
+}
+
+// Decrypt decrypts
+func (ctx WASMContext) Decrypt(ciphertext []byte, nonce []byte) ([]byte, error) {
+	if len(ciphertext) == 0 {
+		return []byte{}, nil
+	}
+
+	txSenderPrivKey, _, err := ctx.GetTxSenderKeyPair()
+
+	txEncryptionKey, err := ctx.getTxEncryptionKey(txSenderPrivKey, nonce)
+	if err != nil {
+		return nil, err
+	}
+
 	cipher, err := miscreant.NewAESCMACSIV(txEncryptionKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return cipher.Open(nil, ciphertext, []byte{})
+}
+
+func (ctx WASMContext) DecryptError(errString string, msgType string, nonce []byte) (cosmwasmTypes.StdError, error) {
+	errorCipherB64 := strings.ReplaceAll(errString, msgType+" contract failed: encrypted: ", "")
+	errorCipherB64 = strings.ReplaceAll(errorCipherB64, ": failed to execute message; message index: 0", "")
+
+	errorCipherBz, err := base64.StdEncoding.DecodeString(errorCipherB64)
+	if err != nil {
+		return cosmwasmTypes.StdError{}, fmt.Errorf("Got an error decoding base64 of the error: %w", err)
+	}
+
+	errorPlainBz, err := ctx.Decrypt(errorCipherBz, nonce)
+	if err != nil {
+		return cosmwasmTypes.StdError{}, fmt.Errorf("Got an error decrypting the error: %w", err)
+	}
+
+	var stdErr cosmwasmTypes.StdError
+	err = json.Unmarshal(errorPlainBz, &stdErr)
+	if err != nil {
+		return cosmwasmTypes.StdError{}, fmt.Errorf("Error while trying to parse the error as json: '%s': %w", string(errorPlainBz), err)
+	}
+
+	return stdErr, nil
+}
+
+func encryptData(aesEncryptionKey []byte, txSenderPubKey []byte, plaintext []byte, nonce []byte) ([]byte, error) {
+	cipher, err := miscreant.NewAESCMACSIV(aesEncryptionKey)
 	if err != nil {
 		log.Println(err)
 		return nil, err
@@ -199,19 +288,18 @@ func (ctx WASMContext) Encrypt(plaintext []byte) ([]byte, error) {
 	return ciphertext, nil
 }
 
-// Decrypt decrypts
-func (ctx WASMContext) Decrypt(ciphertext []byte, nonce []byte) ([]byte, error) {
-	txSenderPrivKey, _, err := ctx.GetTxSenderKeyPair()
-
-	txEncryptionKey, err := ctx.getTxEncryptionKey(txSenderPrivKey, nonce)
+func GetTxEncryptionKeyOffline(pubkey []byte, txSenderPrivKey []byte, nonce []byte) ([]byte, error) {
+	txEncryptionIkm, err := curve25519.X25519(txSenderPrivKey, pubkey)
 	if err != nil {
 		return nil, err
 	}
 
-	cipher, err := miscreant.NewAESCMACSIV(txEncryptionKey)
-	if err != nil {
+	kdfFunc := hkdf.New(sha256.New, append(txEncryptionIkm[:], nonce...), hkdfSalt, []byte{})
+
+	txEncryptionKey := make([]byte, 32)
+	if _, err := io.ReadFull(kdfFunc, txEncryptionKey); err != nil {
 		return nil, err
 	}
 
-	return cipher.Open(nil, ciphertext, []byte{})
+	return txEncryptionKey, nil
 }
