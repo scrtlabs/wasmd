@@ -49,7 +49,7 @@ import (
 	tmtypes "github.com/tendermint/tendermint/types"
 	dbm "github.com/tendermint/tm-db"
 
-	"github.com/cosmwasm/wasmd/app"
+	"github.com/CosmWasm/wasmd/app"
 )
 
 // TODO: Make InitializeTestLCD safe to call in multiple tests at the same time
@@ -382,6 +382,9 @@ func CreateAddr(name string, kb crkeys.Keybase) (sdk.AccAddress, string, error) 
 		seed string
 	)
 	info, seed, err = kb.CreateMnemonic(name, crkeys.English, keys.DefaultKeyPass, crkeys.Secp256k1)
+	if err != nil {
+		return nil, "", err
+	}
 	return sdk.AccAddress(info.GetPubKey().Address()), seed, err
 }
 

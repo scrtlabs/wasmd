@@ -552,6 +552,7 @@ func TestExecuteWithStorageLoop(t *testing.T) {
 	initMsgBz, err := json.Marshal(initMsg)
 
 	addr, _, err := initHelper(t, keeper, ctx, contractID, creator, string(initMsgBz), false, defaultGasForTests)
+	require.NoError(t, err)
 
 	// make sure we set a limit before calling
 	var gasLimit uint64 = 400_000
