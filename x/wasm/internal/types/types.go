@@ -1,17 +1,21 @@
 package types
 
 import (
+	"encoding/base64"
 	"encoding/json"
 
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	tmBytes "github.com/tendermint/tendermint/libs/bytes"
 
-	wasmTypes "github.com/CosmWasm/go-cosmwasm/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
+	wasmTypes "github.com/enigmampc/SecretNetwork/go-cosmwasm/types"
+	sdk "github.com/enigmampc/cosmos-sdk/types"
 )
 
 const defaultLRUCacheSize = uint64(0)
 const defaultQueryGasLimit = uint64(3000000)
+
+// base64 of a 64 byte key
+type ContractKey string
 
 // Model is a struct that holds a KV pair
 type Model struct {
@@ -188,7 +192,7 @@ func NewAbsoluteTxPosition(ctx sdk.Context) *AbsoluteTxPosition {
 }
 
 // NewEnv initializes the environment for a contract instance
-func NewEnv(ctx sdk.Context, creator sdk.AccAddress, deposit sdk.Coins, contractAddr sdk.AccAddress) wasmTypes.Env {
+func NewEnv(ctx sdk.Context, creator sdk.AccAddress, deposit sdk.Coins, contractAddr sdk.AccAddress, contractKey []byte) wasmTypes.Env {
 	// safety checks before casting below
 	if ctx.BlockHeight() < 0 {
 		panic("Block height must never be negative")
@@ -209,6 +213,7 @@ func NewEnv(ctx sdk.Context, creator sdk.AccAddress, deposit sdk.Coins, contract
 		Contract: wasmTypes.ContractInfo{
 			Address: contractAddr.String(),
 		},
+		Key: wasmTypes.ContractKey(base64.StdEncoding.EncodeToString(contractKey)),
 	}
 	return env
 }
@@ -257,4 +262,13 @@ func DefaultWasmConfig() WasmConfig {
 		SmartQueryGasLimit: defaultQueryGasLimit,
 		CacheSize:          defaultLRUCacheSize,
 	}
+}
+
+type SecretMsg struct {
+	CodeHash []byte
+	Msg      []byte
+}
+
+func (m SecretMsg) Serialize() []byte {
+	return append(m.CodeHash, m.Msg...)
 }

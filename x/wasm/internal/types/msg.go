@@ -3,8 +3,8 @@ package types
 import (
 	"encoding/json"
 
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
+	sdk "github.com/enigmampc/cosmos-sdk/types"
+	sdkerrors "github.com/enigmampc/cosmos-sdk/types/errors"
 )
 
 type MsgStoreCode struct {
@@ -62,11 +62,13 @@ func (msg MsgStoreCode) GetSigners() []sdk.AccAddress {
 type MsgInstantiateContract struct {
 	Sender sdk.AccAddress `json:"sender" yaml:"sender"`
 	// Admin is an optional address that can execute migrations
-	Admin     sdk.AccAddress  `json:"admin,omitempty" yaml:"admin"`
-	CodeID    uint64          `json:"code_id" yaml:"code_id"`
-	Label     string          `json:"label" yaml:"label"`
-	InitMsg   json.RawMessage `json:"init_msg" yaml:"init_msg"`
-	InitFunds sdk.Coins       `json:"init_funds" yaml:"init_funds"`
+	Admin sdk.AccAddress `json:"admin,omitempty" yaml:"admin"`
+	// This field is only used for callbacks constructed with this message type
+	CallbackCodeHash  string    `json:"callback_code_hash" yaml:"callback_code_hash"`
+	CodeID      uint64    `json:"code_id" yaml:"code_id"`
+	Label     string    `json:"label" yaml:"label"`
+	InitMsg   []byte    `json:"init_msg" yaml:"init_msg"`
+	InitFunds sdk.Coins `json:"init_funds" yaml:"init_funds"`
 }
 
 func (msg MsgInstantiateContract) Route() string {
@@ -114,10 +116,11 @@ func (msg MsgInstantiateContract) GetSigners() []sdk.AccAddress {
 }
 
 type MsgExecuteContract struct {
-	Sender    sdk.AccAddress  `json:"sender" yaml:"sender"`
-	Contract  sdk.AccAddress  `json:"contract" yaml:"contract"`
-	Msg       json.RawMessage `json:"msg" yaml:"msg"`
-	SentFunds sdk.Coins       `json:"sent_funds" yaml:"sent_funds"`
+	Sender           sdk.AccAddress `json:"sender" yaml:"sender"`
+	Contract         sdk.AccAddress `json:"contract" yaml:"contract"`
+	Msg              []byte         `json:"msg" yaml:"msg"`
+	CallbackCodeHash string         `json:"callback_code_hash" yaml:"callback_code_hash"`
+	SentFunds        sdk.Coins      `json:"sent_funds" yaml:"sent_funds"`
 }
 
 func (msg MsgExecuteContract) Route() string {

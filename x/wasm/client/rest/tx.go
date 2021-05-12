@@ -4,14 +4,14 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/cosmos/cosmos-sdk/client/context"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/types/rest"
-	"github.com/cosmos/cosmos-sdk/x/auth/client/utils"
+	"github.com/enigmampc/cosmos-sdk/client/context"
+	sdk "github.com/enigmampc/cosmos-sdk/types"
+	"github.com/enigmampc/cosmos-sdk/types/rest"
+	"github.com/enigmampc/cosmos-sdk/x/auth/client/utils"
 	"github.com/gorilla/mux"
 
-	wasmUtils "github.com/CosmWasm/wasmd/x/wasm/client/utils"
-	"github.com/CosmWasm/wasmd/x/wasm/internal/types"
+	wasmUtils "github.com/enigmampc/SecretNetwork/x/compute/client/utils"
+	"github.com/enigmampc/SecretNetwork/x/compute/internal/types"
 )
 
 func registerTxRoutes(cliCtx context.CLIContext, r *mux.Router) {
@@ -114,11 +114,12 @@ func instantiateContractHandlerFn(cliCtx context.CLIContext) http.HandlerFunc {
 		}
 
 		msg := types.MsgInstantiateContract{
-			Sender:    cliCtx.GetFromAddress(),
-			CodeID:    codeID,
-			InitFunds: req.Deposit,
-			InitMsg:   req.InitMsg,
-			Admin:     req.Admin,
+			Sender:           cliCtx.GetFromAddress(),
+			CodeID:             codeID,
+			CallbackCodeHash: "",
+			InitFunds:        req.Deposit,
+			InitMsg:          req.InitMsg,
+			Admin:            req.Admin,
 		}
 
 		err = msg.ValidateBasic()
@@ -151,10 +152,11 @@ func executeContractHandlerFn(cliCtx context.CLIContext) http.HandlerFunc {
 		}
 
 		msg := types.MsgExecuteContract{
-			Sender:    cliCtx.GetFromAddress(),
-			Contract:  contractAddress,
-			Msg:       req.ExecMsg,
-			SentFunds: req.Amount,
+			Sender:           cliCtx.GetFromAddress(),
+			Contract:         contractAddress,
+			CallbackCodeHash: "",
+			Msg:              req.ExecMsg,
+			SentFunds:        req.Amount,
 		}
 
 		err = msg.ValidateBasic()

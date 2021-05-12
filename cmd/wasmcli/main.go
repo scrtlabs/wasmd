@@ -5,49 +5,45 @@ import (
 	"os"
 	"path"
 
+	"github.com/enigmampc/cosmos-sdk/client"
+	"github.com/enigmampc/cosmos-sdk/client/flags"
+	"github.com/enigmampc/cosmos-sdk/client/keys"
+	"github.com/enigmampc/cosmos-sdk/client/lcd"
+	"github.com/enigmampc/cosmos-sdk/client/rpc"
+	sdk "github.com/enigmampc/cosmos-sdk/types"
+	"github.com/enigmampc/cosmos-sdk/version"
+	"github.com/enigmampc/cosmos-sdk/x/auth"
+	authcmd "github.com/enigmampc/cosmos-sdk/x/auth/client/cli"
+	authrest "github.com/enigmampc/cosmos-sdk/x/auth/client/rest"
+	"github.com/enigmampc/cosmos-sdk/x/bank"
+	bankcmd "github.com/enigmampc/cosmos-sdk/x/bank/client/cli"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-
-	"github.com/cosmos/cosmos-sdk/client"
-	"github.com/cosmos/cosmos-sdk/client/flags"
-	"github.com/cosmos/cosmos-sdk/client/keys"
-	"github.com/cosmos/cosmos-sdk/client/lcd"
-	"github.com/cosmos/cosmos-sdk/client/rpc"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/version"
-	"github.com/cosmos/cosmos-sdk/x/auth"
-	authcmd "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
-	authrest "github.com/cosmos/cosmos-sdk/x/auth/client/rest"
-	"github.com/cosmos/cosmos-sdk/x/bank"
-	bankcmd "github.com/cosmos/cosmos-sdk/x/bank/client/cli"
-
 	"github.com/tendermint/go-amino"
 	"github.com/tendermint/tendermint/libs/cli"
 
-	"github.com/CosmWasm/wasmd/app"
+	app "github.com/enigmampc/SecretNetwork"
+	scrt "github.com/enigmampc/SecretNetwork/types"
 )
 
 func main() {
-	// Configure cobra to sort commands
 	cobra.EnableCommandSorting = false
 
-	// Instantiate the codec for the command line application
 	cdc := app.MakeCodec()
 
 	// Read in the configuration file for the sdk
 	config := sdk.GetConfig()
-	config.SetBech32PrefixForAccount(app.Bech32PrefixAccAddr, app.Bech32PrefixAccPub)
-	config.SetBech32PrefixForValidator(app.Bech32PrefixValAddr, app.Bech32PrefixValPub)
-	config.SetBech32PrefixForConsensusNode(app.Bech32PrefixConsAddr, app.Bech32PrefixConsPub)
+	config.SetCoinType(529)
+	config.SetFullFundraiserPath("44'/529'/0'/0/0")
+	config.SetBech32PrefixForAccount(scrt.Bech32PrefixAccAddr, scrt.Bech32PrefixAccPub)
+	config.SetBech32PrefixForValidator(scrt.Bech32PrefixValAddr, scrt.Bech32PrefixValPub)
+	config.SetBech32PrefixForConsensusNode(scrt.Bech32PrefixConsAddr, scrt.Bech32PrefixConsPub)
 	config.Seal()
 
-	// TODO: setup keybase, viper object, etc. to be passed into
-	// the below functions and eliminate global vars, like we do
-	// with the cdc
-
 	rootCmd := &cobra.Command{
-		Use:   version.ClientName,
-		Short: "Command line interface for interacting with " + version.ServerName,
+		Use:   "secretcli",
+		Short: "The Secret Network Client",
 	}
 
 	// Add --chain-id to persistent flags and mark it required
@@ -71,8 +67,8 @@ func main() {
 		flags.NewCompletionCmd(rootCmd, true),
 	)
 
-	// Add flags and prefix all env exposed with WM
-	executor := cli.PrepareMainCmd(rootCmd, "WM", app.DefaultCLIHome)
+	// Add flags and prefix all env exposed with EN
+	executor := cli.PrepareMainCmd(rootCmd, "EN", app.DefaultCLIHome)
 
 	err := executor.Execute()
 	if err != nil {
@@ -94,7 +90,7 @@ func queryCmd(cdc *amino.Codec) *cobra.Command {
 		rpc.ValidatorCommand(cdc),
 		rpc.BlockCommand(),
 		authcmd.QueryTxsByEventsCmd(cdc),
-		authcmd.QueryTxCmd(cdc),
+		authcmd.QueryTxCmd(cdc), // TODO add another one like this that decrypts the output if it's from the wallet that sent the tx
 		flags.LineBreak,
 	)
 
@@ -119,8 +115,6 @@ func txCmd(cdc *amino.Codec) *cobra.Command {
 		authcmd.GetBroadcastCommand(cdc),
 		authcmd.GetEncodeCommand(cdc),
 		authcmd.GetDecodeCommand(cdc),
-		// TODO: I think it is safe to remove
-		// authcmd.GetDecodeTxCmd(cdc),
 		flags.LineBreak,
 	)
 

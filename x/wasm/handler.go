@@ -1,11 +1,11 @@
-package wasm
+package compute
 
 import (
 	"fmt"
 
-	"github.com/CosmWasm/wasmd/x/wasm/internal/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
+	"github.com/enigmampc/SecretNetwork/x/compute/internal/types"
+	sdk "github.com/enigmampc/cosmos-sdk/types"
+	sdkerrors "github.com/enigmampc/cosmos-sdk/types/errors"
 )
 
 // NewHandler returns a handler for "bank" type messages.
@@ -14,6 +14,7 @@ func NewHandler(k Keeper) sdk.Handler {
 		ctx = ctx.WithEventManager(sdk.NewEventManager())
 
 		switch msg := msg.(type) {
+
 		case MsgStoreCode:
 			return handleStoreCode(ctx, k, &msg)
 		case MsgInstantiateContract:
@@ -86,6 +87,10 @@ func handleInstantiate(ctx sdk.Context, k Keeper, msg *MsgInstantiateContract) (
 		sdk.NewAttribute(types.AttributeKeyContract, contractAddr.String()),
 	)
 
+	// TODO Assaf:
+	// also need to parse here output events and pass them to Tendermint
+	// but k.Instantiate() doesn't return any output data right now, just contractAddr
+
 	return &sdk.Result{
 		Data:   contractAddr,
 		Events: append(events, ourEvent),
@@ -107,7 +112,8 @@ func handleExecute(ctx sdk.Context, k Keeper, msg *MsgExecuteContract) (*sdk.Res
 	)
 
 	res.Events = append(events, ourEvent)
-	return res, nil
+
+	return &res, nil
 }
 
 func handleMigration(ctx sdk.Context, k Keeper, msg *MsgMigrateContract) (*sdk.Result, error) {

@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 
-	wasmTypes "github.com/CosmWasm/go-cosmwasm/types"
-	"github.com/CosmWasm/wasmd/x/wasm/internal/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
-	"github.com/cosmos/cosmos-sdk/x/bank"
-	"github.com/cosmos/cosmos-sdk/x/distribution"
-	"github.com/cosmos/cosmos-sdk/x/staking"
+	wasmTypes "github.com/enigmampc/SecretNetwork/go-cosmwasm/types"
+	"github.com/enigmampc/SecretNetwork/x/compute/internal/types"
+	sdk "github.com/enigmampc/cosmos-sdk/types"
+	sdkerrors "github.com/enigmampc/cosmos-sdk/types/errors"
+	"github.com/enigmampc/cosmos-sdk/x/bank"
+	"github.com/enigmampc/cosmos-sdk/x/distribution"
+	"github.com/enigmampc/cosmos-sdk/x/staking"
 )
 
 type MessageHandler struct {
@@ -203,10 +203,11 @@ func EncodeWasmMsg(sender sdk.AccAddress, msg *wasmTypes.WasmMsg) ([]sdk.Msg, er
 		}
 
 		sdkMsg := types.MsgExecuteContract{
-			Sender:    sender,
-			Contract:  contractAddr,
-			Msg:       msg.Execute.Msg,
-			SentFunds: coins,
+			Sender:           sender,
+			Contract:         contractAddr,
+			CallbackCodeHash: msg.Execute.CallbackCodeHash,
+			Msg:              msg.Execute.Msg,
+			SentFunds:        coins,
 		}
 		return []sdk.Msg{sdkMsg}, nil
 	}
@@ -220,9 +221,10 @@ func EncodeWasmMsg(sender sdk.AccAddress, msg *wasmTypes.WasmMsg) ([]sdk.Msg, er
 			Sender: sender,
 			CodeID: msg.Instantiate.CodeID,
 			// TODO: add this to CosmWasm
-			Label:     fmt.Sprintf("Auto-created by %s", sender),
-			InitMsg:   msg.Instantiate.Msg,
-			InitFunds: coins,
+			Label:            msg.Instantiate.Label,
+			CallbackCodeHash: msg.Instantiate.CallbackCodeHash,
+			InitMsg:          msg.Instantiate.Msg,
+			InitFunds:        coins,
 		}
 		return []sdk.Msg{sdkMsg}, nil
 	}

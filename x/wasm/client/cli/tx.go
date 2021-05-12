@@ -2,24 +2,27 @@ package cli
 
 import (
 	"bufio"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"github.com/enigmampc/SecretNetwork/x/compute/internal/keeper"
 	"io/ioutil"
 	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/cosmos/cosmos-sdk/client"
-	"github.com/cosmos/cosmos-sdk/client/context"
-	"github.com/cosmos/cosmos-sdk/client/flags"
-	"github.com/cosmos/cosmos-sdk/codec"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
-	"github.com/cosmos/cosmos-sdk/x/auth"
-	"github.com/cosmos/cosmos-sdk/x/auth/client/utils"
+	"github.com/enigmampc/cosmos-sdk/client"
+	"github.com/enigmampc/cosmos-sdk/client/context"
+	"github.com/enigmampc/cosmos-sdk/client/flags"
+	"github.com/enigmampc/cosmos-sdk/codec"
+	sdk "github.com/enigmampc/cosmos-sdk/types"
+	sdkerrors "github.com/enigmampc/cosmos-sdk/types/errors"
+	"github.com/enigmampc/cosmos-sdk/x/auth"
+	"github.com/enigmampc/cosmos-sdk/x/auth/client/utils"
 
-	wasmUtils "github.com/CosmWasm/wasmd/x/wasm/client/utils"
-	"github.com/CosmWasm/wasmd/x/wasm/internal/types"
+	wasmUtils "github.com/enigmampc/SecretNetwork/x/compute/client/utils"
+	"github.com/enigmampc/SecretNetwork/x/compute/internal/types"
 )
 
 const (
@@ -32,13 +35,15 @@ const (
 	flagInstantiateByEverybody = "instantiate-everybody"
 	flagInstantiateByAddress   = "instantiate-only-address"
 	flagProposalType           = "type"
+	flagIoMasterKey = "enclave-key"
+	flagCodeHash    = "code-hash"
 )
 
 // GetTxCmd returns the transaction commands for this module
 func GetTxCmd(cdc *codec.Codec) *cobra.Command {
 	txCmd := &cobra.Command{
 		Use:                        types.ModuleName,
-		Short:                      "Wasm transaction subcommands",
+		Short:                      "Compute transaction subcommands",
 		DisableFlagParsing:         true,
 		SuggestionsMinimumDistance: 2,
 		RunE:                       client.ValidateCmd,
@@ -47,9 +52,10 @@ func GetTxCmd(cdc *codec.Codec) *cobra.Command {
 		StoreCodeCmd(cdc),
 		InstantiateContractCmd(cdc),
 		ExecuteContractCmd(cdc),
-		MigrateContractCmd(cdc),
-		UpdateContractAdminCmd(cdc),
-		ClearContractAdminCmd(cdc),
+		// Currently not supporting these commands
+		//MigrateContractCmd(cdc),
+		//UpdateContractAdminCmd(cdc),
+		//ClearContractAdminCmd(cdc),
 	)...)
 	return txCmd
 }
@@ -135,6 +141,8 @@ func InstantiateContractCmd(cdc *codec.Codec) *cobra.Command {
 			inBuf := bufio.NewReader(cmd.InOrStdin())
 			txBldr := auth.NewTxBuilderFromCLI(inBuf).WithTxEncoder(utils.GetTxEncoder(cdc))
 			cliCtx := context.NewCLIContextWithInput(inBuf).WithCodec(cdc)
+			wasmCtx := wasmUtils.WASMContext{CLIContext: cliCtx}
+			initMsg := types.SecretMsg{}
 
 			msg, err := parseInstantiateArgs(args, cliCtx)
 			if err != nil {
@@ -147,6 +155,9 @@ func InstantiateContractCmd(cdc *codec.Codec) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().String(flagCodeHash, "", "For offline transactions, use this to specify the target contract's code hash")
+	cmd.Flags().String(flagIoMasterKey, "", "For offline transactions, use this to specify the path to the "+
+		"io-master-cert.der file, which you can get using the command `secretcli q register secret-network-params` ")
 	cmd.Flags().String(flagAmount, "", "Coins to send to the contract during instantiation")
 	cmd.Flags().String(flagLabel, "", "A human-readable name for this contract in lists")
 	cmd.Flags().String(flagAdmin, "", "Address of an admin")
@@ -171,7 +182,44 @@ func parseInstantiateArgs(args []string, cliCtx context.CLIContext) (types.MsgIn
 		return types.MsgInstantiateContract{}, fmt.Errorf("Label is required on all contracts")
 	}
 
-	initMsg := args[1]
+	var encryptedMsg []byte
+	if viper.GetBool(flags.FlagGenerateOnly) {
+		// if we're creating an offline transaction we just need the path to the io master key
+		ioKeyPath := viper.GetString(flagIoMasterKey)
+
+		if ioKeyPath == "" {
+			return types.MsgInstantiateContract{}, fmt.Errorf("missing flag --%s. To create an offline transaction, you must specify path to the enclave key", flagIoMasterKey)
+		}
+
+		codeHash := viper.GetString(flagCodeHash)
+		if codeHash == "" {
+			return types.MsgInstantiateContract{}, fmt.Errorf("missing flag --%s. To create an offline transaction, you must set the target contract's code hash", flagCodeHash)
+		}
+		initMsg.CodeHash = []byte(codeHash)
+
+		encryptedMsg, err = wasmCtx.OfflineEncrypt(initMsg.Serialize(), ioKeyPath)
+	} else {
+		// if we aren't creating an offline transaction we can validate the chosen label
+		route := fmt.Sprintf("custom/%s/%s/%s", types.QuerierRoute, keeper.QueryContractAddress, label)
+		res, _, _ := cliCtx.Query(route)
+		if res != nil {
+			return types.MsgInstantiateContract{}, fmt.Errorf("label already exists. You must choose a unique label for your contract instance")
+		}
+
+		initMsg.CodeHash, err = GetCodeHashByCodeId(cliCtx, args[0])
+		if err != nil {
+			return types.MsgInstantiateContract{}, err
+		}
+
+		// todo: Add check that this is valid json and stuff
+		initMsg.Msg = []byte(args[1])
+
+		encryptedMsg, err = wasmCtx.Encrypt(initMsg.Serialize())
+	}
+
+	if err != nil {
+		return types.MsgInstantiateContract{}, err
+	}
 
 	adminStr := viper.GetString(flagAdmin)
 	var adminAddr sdk.AccAddress
@@ -184,12 +232,13 @@ func parseInstantiateArgs(args []string, cliCtx context.CLIContext) (types.MsgIn
 
 	// build and sign the transaction, then broadcast to Tendermint
 	msg := types.MsgInstantiateContract{
-		Sender:    cliCtx.GetFromAddress(),
-		CodeID:    codeID,
-		Label:     label,
-		InitFunds: amount,
-		InitMsg:   []byte(initMsg),
-		Admin:     adminAddr,
+		Sender:           cliCtx.GetFromAddress(),
+		CallbackCodeHash: "",
+		CodeID:           codeID,
+		Label:            label,
+		InitFunds:        amount,
+		InitMsg:          encryptedMsg,
+		Admin:            adminAddr,
 	}
 	return msg, nil
 }
@@ -197,18 +246,45 @@ func parseInstantiateArgs(args []string, cliCtx context.CLIContext) (types.MsgIn
 // ExecuteContractCmd will instantiate a contract from previously uploaded code.
 func ExecuteContractCmd(cdc *codec.Codec) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "execute [contract_addr_bech32] [json_encoded_send_args]",
+		Use:   "execute [optional: contract_addr_bech32] [json_encoded_send_args]",
 		Short: "Execute a command on a wasm contract",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			inBuf := bufio.NewReader(cmd.InOrStdin())
 			txBldr := auth.NewTxBuilderFromCLI(inBuf).WithTxEncoder(utils.GetTxEncoder(cdc))
 			cliCtx := context.NewCLIContextWithInput(inBuf).WithCodec(cdc)
+			wasmCtx := wasmUtils.WASMContext{CLIContext: cliCtx}
+			execMsg := types.SecretMsg{}
+			contractAddr := sdk.AccAddress{}
 
-			// get the id of the code to instantiate
-			contractAddr, err := sdk.AccAddressFromBech32(args[0])
-			if err != nil {
-				return err
+			if len(args) == 1 {
+
+				if viper.GetBool(flags.FlagGenerateOnly) {
+					return fmt.Errorf("offline transactions must contain contract address")
+				}
+
+				label := viper.GetString(flagLabel)
+				if label == "" {
+					return fmt.Errorf("label or bech32 contract address is required")
+				}
+
+				route := fmt.Sprintf("custom/%s/%s/%s", types.QuerierRoute, keeper.QueryContractAddress, label)
+				res, _, err := cliCtx.Query(route)
+				if err != nil {
+					return err
+				}
+
+				contractAddr = res
+				execMsg.Msg = []byte(args[0])
+			} else {
+				// get the id of the code to instantiate
+				res, err := sdk.AccAddressFromBech32(args[0])
+				if err != nil {
+					return err
+				}
+
+				contractAddr = res
+				execMsg.Msg = []byte(args[1])
 			}
 
 			amounstStr := viper.GetString(flagAmount)
@@ -217,19 +293,76 @@ func ExecuteContractCmd(cdc *codec.Codec) *cobra.Command {
 				return err
 			}
 
-			execMsg := args[1]
+			var encryptedMsg []byte
+			if viper.GetBool(flags.FlagGenerateOnly) {
+				ioKeyPath := viper.GetString(flagIoMasterKey)
+
+				if ioKeyPath == "" {
+					return fmt.Errorf("missing flag --%s. To create an offline transaction, you must specify path to the enclave key", flagIoMasterKey)
+				}
+
+				codeHash := viper.GetString(flagCodeHash)
+				if codeHash == "" {
+					return fmt.Errorf("missing flag --%s. To create an offline transaction, you must set the target contract's code hash", flagCodeHash)
+				}
+				execMsg.CodeHash = []byte(codeHash)
+
+				encryptedMsg, err = wasmCtx.OfflineEncrypt(execMsg.Serialize(), ioKeyPath)
+			} else {
+				execMsg.CodeHash, err = GetCodeHashByContractAddr(cliCtx, contractAddr)
+				if err != nil {
+					return err
+				}
+
+				encryptedMsg, err = wasmCtx.Encrypt(execMsg.Serialize())
+			}
+			if err != nil {
+				return err
+			}
 
 			// build and sign the transaction, then broadcast to Tendermint
 			msg := types.MsgExecuteContract{
-				Sender:    cliCtx.GetFromAddress(),
-				Contract:  contractAddr,
-				SentFunds: amount,
-				Msg:       []byte(execMsg),
+				Sender:           cliCtx.GetFromAddress(),
+				Contract:         contractAddr,
+				CallbackCodeHash: "",
+				SentFunds:        amount,
+				Msg:              encryptedMsg,
 			}
 			return utils.GenerateOrBroadcastMsgs(cliCtx, txBldr, []sdk.Msg{msg})
 		},
 	}
 
+	cmd.Flags().String(flagCodeHash, "", "For offline transactions, use this to specify the target contract's code hash")
+	cmd.Flags().String(flagIoMasterKey, "", "For offline transactions, use this to specify the path to the "+
+		"io-master-cert.der file, which you can get using the command `secretcli q register secret-network-params` ")
 	cmd.Flags().String(flagAmount, "", "Coins to send to the contract along with command")
+	cmd.Flags().String(flagLabel, "", "A human-readable name for this contract in lists")
 	return cmd
+}
+
+func GetCodeHashByCodeId(cliCtx context.CLIContext, codeID string) ([]byte, error) {
+	route := fmt.Sprintf("custom/%s/%s/%s", types.QuerierRoute, keeper.QueryGetCode, codeID)
+	res, _, err := cliCtx.Query(route)
+	if err != nil {
+		return nil, err
+	}
+
+	var codeResp keeper.GetCodeResponse
+
+	err = json.Unmarshal(res, &codeResp)
+	if err != nil {
+		return nil, err
+	}
+
+	return []byte(hex.EncodeToString(codeResp.DataHash)), nil
+}
+
+func GetCodeHashByContractAddr(cliCtx context.CLIContext, contractAddr sdk.AccAddress) ([]byte, error) {
+	route := fmt.Sprintf("custom/%s/%s/%s", types.QuerierRoute, keeper.QueryContractHash, contractAddr.String())
+	res, _, err := cliCtx.Query(route)
+	if err != nil {
+		return nil, err
+	}
+
+	return []byte(hex.EncodeToString(res)), nil
 }

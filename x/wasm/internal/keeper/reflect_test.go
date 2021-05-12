@@ -1,22 +1,24 @@
 package keeper
 
 import (
+	"encoding/hex"
 	"encoding/json"
-	"github.com/CosmWasm/wasmd/x/wasm/internal/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/enigmampc/SecretNetwork/x/compute/internal/types"
+	sdkerrors "github.com/enigmampc/cosmos-sdk/types/errors"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	wasmTypes "github.com/CosmWasm/go-cosmwasm/types"
-	"github.com/cosmos/cosmos-sdk/codec"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/x/auth"
-	"github.com/cosmos/cosmos-sdk/x/bank"
+	wasmTypes "github.com/enigmampc/SecretNetwork/go-cosmwasm/types"
+	"github.com/enigmampc/cosmos-sdk/codec"
+	sdk "github.com/enigmampc/cosmos-sdk/types"
+	"github.com/enigmampc/cosmos-sdk/x/auth"
+	"github.com/enigmampc/cosmos-sdk/x/bank"
 )
 
 // MaskInitMsg is {}
@@ -76,9 +78,12 @@ func TestMaskReflectContractSend(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), escrowID)
 
-	// creator instantiates a contract and gives it tokens
 	maskStart := sdk.NewCoins(sdk.NewInt64Coin("denom", 40000))
-	maskAddr, err := keeper.Instantiate(ctx, maskID, creator, nil, []byte("{}"), "mask contract 2", maskStart)
+
+	initMsgBz, err := testEncrypt(t, keeper, ctx, nil, maskID, []byte("{}"))
+	require.NoError(t, err)
+
+	maskAddr, err := keeper.Instantiate(ctx, maskID, creator, nil, initMsgBz, "mask contract 2", maskStart)
 	require.NoError(t, err)
 	require.NotEmpty(t, maskAddr)
 
@@ -87,10 +92,17 @@ func TestMaskReflectContractSend(t *testing.T) {
 		Verifier:    maskAddr,
 		Beneficiary: bob,
 	}
-	initMsgBz, err := json.Marshal(initMsg)
+
+	initMsgBz, err = json.Marshal(initMsg)
 	require.NoError(t, err)
+
+	initMsgBz, err = testEncrypt(t, keeper, ctx, nil, escrowID, initMsgBz)
+	require.NoError(t, err)
+
 	escrowStart := sdk.NewCoins(sdk.NewInt64Coin("denom", 25000))
+
 	escrowAddr, err := keeper.Instantiate(ctx, escrowID, creator, nil, initMsgBz, "escrow contract 2", escrowStart)
+
 	require.NoError(t, err)
 	require.NotEmpty(t, escrowAddr)
 
@@ -104,12 +116,15 @@ func TestMaskReflectContractSend(t *testing.T) {
 	// we also send an additional 14k tokens there.
 	// this should reduce the mask balance by 14k (to 26k)
 	// this 14k is added to the escrow, then the entire balance is sent to bob (total: 39k)
-	approveMsg := []byte(`{"release":{}}`)
+
+	contractCodeHash := hex.EncodeToString(keeper.GetContractHash(ctx, escrowAddr))
+	// approveMsg := []byte(contractCodeHash + `{"release":{}}`)
 	msgs := []wasmTypes.CosmosMsg{{
 		Wasm: &wasmTypes.WasmMsg{
 			Execute: &wasmTypes.ExecuteMsg{
-				ContractAddr: escrowAddr.String(),
-				Msg:          approveMsg,
+				ContractAddr:     escrowAddr.String(),
+				CallbackCodeHash: contractCodeHash,
+				Msg:              []byte(`{"release":{}}`),
 				Send: []wasmTypes.Coin{{
 					Denom:  "denom",
 					Amount: "14000",
@@ -124,6 +139,10 @@ func TestMaskReflectContractSend(t *testing.T) {
 	}
 	reflectSendBz, err := json.Marshal(reflectSend)
 	require.NoError(t, err)
+
+	reflectSendBz, err = testEncrypt(t, keeper, ctx, maskAddr, 0, reflectSendBz)
+	require.NoError(t, err)
+
 	_, err = keeper.Execute(ctx, maskAddr, creator, reflectSendBz, nil)
 	require.NoError(t, err)
 
@@ -155,8 +174,10 @@ func TestMaskReflectCustomMsg(t *testing.T) {
 	require.Equal(t, uint64(1), codeID)
 
 	// creator instantiates a contract and gives it tokens
+	initMsgBz, err := testEncrypt(t, keeper, ctx, nil, codeID, []byte("{}"))
+	require.NoError(t, err)
 	contractStart := sdk.NewCoins(sdk.NewInt64Coin("denom", 40000))
-	contractAddr, err := keeper.Instantiate(ctx, codeID, creator, nil, []byte("{}"), "mask contract 1", contractStart)
+	contractAddr, err := keeper.Instantiate(ctx, codeID, creator, nil, initMsgBz, "mask contract 1", contractStart)
 	require.NoError(t, err)
 	require.NotEmpty(t, contractAddr)
 
@@ -167,6 +188,8 @@ func TestMaskReflectCustomMsg(t *testing.T) {
 		},
 	}
 	transferBz, err := json.Marshal(transfer)
+	require.NoError(t, err)
+	transferBz, err = testEncrypt(t, keeper, ctx, contractAddr, 0, transferBz)
 	require.NoError(t, err)
 	_, err = keeper.Execute(ctx, contractAddr, creator, transferBz, nil)
 	require.NoError(t, err)
@@ -196,6 +219,8 @@ func TestMaskReflectCustomMsg(t *testing.T) {
 	}
 	reflectSendBz, err := json.Marshal(reflectSend)
 	require.NoError(t, err)
+	reflectSendBz, err = testEncrypt(t, keeper, ctx, contractAddr, 0, reflectSendBz)
+	require.NoError(t, err)
 	_, err = keeper.Execute(ctx, contractAddr, bob, reflectSendBz, nil)
 	require.NoError(t, err)
 
@@ -219,6 +244,8 @@ func TestMaskReflectCustomMsg(t *testing.T) {
 		},
 	}
 	reflectOpaqueBz, err := json.Marshal(reflectOpaque)
+	require.NoError(t, err)
+	reflectOpaqueBz, err = testEncrypt(t, keeper, ctx, contractAddr, 0, reflectOpaqueBz)
 	require.NoError(t, err)
 
 	_, err = keeper.Execute(ctx, contractAddr, bob, reflectOpaqueBz, nil)
@@ -249,8 +276,10 @@ func TestMaskReflectCustomQuery(t *testing.T) {
 	require.Equal(t, uint64(1), codeID)
 
 	// creator instantiates a contract and gives it tokens
+	initMsgBz, err := testEncrypt(t, keeper, ctx, nil, codeID, []byte("{}"))
+	require.NoError(t, err)
 	contractStart := sdk.NewCoins(sdk.NewInt64Coin("denom", 40000))
-	contractAddr, err := keeper.Instantiate(ctx, codeID, creator, nil, []byte("{}"), "mask contract 1", contractStart)
+	contractAddr, err := keeper.Instantiate(ctx, codeID, creator, nil, initMsgBz, "mask contract 1", contractStart)
 	require.NoError(t, err)
 	require.NotEmpty(t, contractAddr)
 
@@ -260,10 +289,11 @@ func TestMaskReflectCustomQuery(t *testing.T) {
 	}
 	ownerQueryBz, err := json.Marshal(ownerQuery)
 	require.NoError(t, err)
-	ownerRes, err := keeper.QuerySmart(ctx, contractAddr, ownerQueryBz)
-	require.NoError(t, err)
+
+	ownerRes, qErr := queryHelper(t, keeper, ctx, contractAddr, string(ownerQueryBz), true, defaultGasForTests)
+	require.Empty(t, qErr)
 	var res OwnerResponse
-	err = json.Unmarshal(ownerRes, &res)
+	err = json.Unmarshal([]byte(ownerRes), &res)
 	require.NoError(t, err)
 	assert.Equal(t, res.Owner, creator.String())
 
@@ -275,10 +305,12 @@ func TestMaskReflectCustomQuery(t *testing.T) {
 	}
 	customQueryBz, err := json.Marshal(customQuery)
 	require.NoError(t, err)
-	custom, err := keeper.QuerySmart(ctx, contractAddr, customQueryBz)
-	require.NoError(t, err)
+
+	custom, qErr := queryHelper(t, keeper, ctx, contractAddr, string(customQueryBz), true, defaultGasForTests)
+	require.Empty(t, qErr)
+
 	var resp customQueryResponse
-	err = json.Unmarshal(custom, &resp)
+	err = json.Unmarshal([]byte(custom), &resp)
 	require.NoError(t, err)
 	assert.Equal(t, resp.Msg, "ALL CAPS NOW")
 }

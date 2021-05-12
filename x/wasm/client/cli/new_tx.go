@@ -4,17 +4,18 @@ import (
 	"bufio"
 	"strconv"
 
-	"github.com/CosmWasm/wasmd/x/wasm/internal/types"
-	"github.com/cosmos/cosmos-sdk/client/context"
-	"github.com/cosmos/cosmos-sdk/codec"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
-	"github.com/cosmos/cosmos-sdk/x/auth"
-	"github.com/cosmos/cosmos-sdk/x/auth/client/utils"
+	"github.com/enigmampc/SecretNetwork/x/compute/internal/types"
+	"github.com/enigmampc/cosmos-sdk/client/context"
+	"github.com/enigmampc/cosmos-sdk/codec"
+	sdk "github.com/enigmampc/cosmos-sdk/types"
+	sdkerrors "github.com/enigmampc/cosmos-sdk/types/errors"
+	"github.com/enigmampc/cosmos-sdk/x/auth"
+	"github.com/enigmampc/cosmos-sdk/x/auth/client/utils"
 	"github.com/spf13/cobra"
 )
 
 // MigrateContractCmd will migrate a contract to a new code version
+// NO SUPPORT FOR THIS COMMAND YET
 func MigrateContractCmd(cdc *codec.Codec) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "migrate [contract_addr_bech32] [new_code_id_int64] [json_encoded_migration_args]",
@@ -62,6 +63,7 @@ func parseMigrateContractArgs(args []string, cliCtx context.CLIContext) (types.M
 }
 
 // UpdateContractAdminCmd sets an new admin for a contract
+// NO SUPPORT FOR THIS COMMAND YET
 func UpdateContractAdminCmd(cdc *codec.Codec) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set-contract-admin [contract_addr_bech32] [new_admin_addr_bech32]",
@@ -104,6 +106,7 @@ func parseUpdateContractAdminArgs(args []string, cliCtx context.CLIContext) (typ
 }
 
 // ClearContractAdminCmd clears an admin for a contract
+// NO SUPPORT FOR THIS COMMAND YET
 func ClearContractAdminCmd(cdc *codec.Codec) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "clear-contract-admin [contract_addr_bech32]",

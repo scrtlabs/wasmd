@@ -2,11 +2,12 @@ package keeper
 
 import (
 	"encoding/json"
-	wasmTypes "github.com/CosmWasm/go-cosmwasm/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
-	"github.com/cosmos/cosmos-sdk/x/bank"
-	"github.com/cosmos/cosmos-sdk/x/staking"
+
+	wasmTypes "github.com/enigmampc/SecretNetwork/go-cosmwasm/types"
+	sdk "github.com/enigmampc/cosmos-sdk/types"
+	sdkerrors "github.com/enigmampc/cosmos-sdk/types/errors"
+	"github.com/enigmampc/cosmos-sdk/x/bank"
+	"github.com/enigmampc/cosmos-sdk/x/staking"
 )
 
 type QueryHandler struct {
@@ -191,7 +192,7 @@ func sdkToDelegations(ctx sdk.Context, keeper staking.Keeper, delegations []stak
 
 	for i, d := range delegations {
 		// shares to amount logic comes from here:
-		// https://github.com/cosmos/cosmos-sdk/blob/v0.38.3/x/staking/keeper/querier.go#L404
+		// https://github.com/enigmampc/cosmos-sdk/blob/v0.38.3/x/staking/keeper/querier.go#L404
 		val, found := keeper.GetValidator(ctx, d.ValidatorAddress)
 		if !found {
 			return nil, sdkerrors.Wrap(staking.ErrNoValidatorFound, "can't load validator for delegation")
@@ -241,7 +242,7 @@ func WasmQuerier(wasm *Keeper) func(ctx sdk.Context, request *wasmTypes.WasmQuer
 			if err != nil {
 				return nil, sdkerrors.Wrap(sdkerrors.ErrInvalidAddress, request.Smart.ContractAddr)
 			}
-			return wasm.QuerySmart(ctx, addr, request.Smart.Msg)
+			return wasm.QuerySmart(ctx, addr, request.Smart.Msg, true)
 		}
 		if request.Raw != nil {
 			addr, err := sdk.AccAddressFromBech32(request.Raw.ContractAddr)

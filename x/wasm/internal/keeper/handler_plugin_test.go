@@ -3,16 +3,17 @@ package keeper
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/CosmWasm/wasmd/x/wasm/internal/types"
-	"github.com/cosmos/cosmos-sdk/x/distribution"
-	"github.com/cosmos/cosmos-sdk/x/staking"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"testing"
 
-	wasmTypes "github.com/CosmWasm/go-cosmwasm/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/x/bank"
+	"github.com/enigmampc/SecretNetwork/x/compute/internal/types"
+	"github.com/enigmampc/cosmos-sdk/x/distribution"
+	"github.com/enigmampc/cosmos-sdk/x/staking"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	wasmTypes "github.com/enigmampc/SecretNetwork/go-cosmwasm/types"
+	sdk "github.com/enigmampc/cosmos-sdk/types"
+	"github.com/enigmampc/cosmos-sdk/x/bank"
 )
 
 func TestEncoding(t *testing.T) {
@@ -106,8 +107,9 @@ func TestEncoding(t *testing.T) {
 			input: wasmTypes.CosmosMsg{
 				Wasm: &wasmTypes.WasmMsg{
 					Execute: &wasmTypes.ExecuteMsg{
-						ContractAddr: addr2.String(),
-						Msg:          jsonMsg,
+						ContractAddr:     addr2.String(),
+						Msg:              jsonMsg,
+						CallbackCodeHash: "",
 						Send: []wasmTypes.Coin{
 							wasmTypes.NewCoin(12, "eth"),
 						},
@@ -116,10 +118,11 @@ func TestEncoding(t *testing.T) {
 			},
 			output: []sdk.Msg{
 				types.MsgExecuteContract{
-					Sender:    addr1,
-					Contract:  addr2,
-					Msg:       jsonMsg,
-					SentFunds: sdk.NewCoins(sdk.NewInt64Coin("eth", 12)),
+					Sender:           addr1,
+					Contract:         addr2,
+					CallbackCodeHash: "",
+					Msg:              jsonMsg,
+					SentFunds:        sdk.NewCoins(sdk.NewInt64Coin("eth", 12)),
 				},
 			},
 		},
@@ -128,8 +131,9 @@ func TestEncoding(t *testing.T) {
 			input: wasmTypes.CosmosMsg{
 				Wasm: &wasmTypes.WasmMsg{
 					Instantiate: &wasmTypes.InstantiateMsg{
-						CodeID: 7,
-						Msg:    jsonMsg,
+						CodeID:           7,
+						CallbackCodeHash: "",
+						Msg:              jsonMsg,
 						Send: []wasmTypes.Coin{
 							wasmTypes.NewCoin(123, "eth"),
 						},
@@ -138,10 +142,9 @@ func TestEncoding(t *testing.T) {
 			},
 			output: []sdk.Msg{
 				types.MsgInstantiateContract{
-					Sender: addr1,
-					CodeID: 7,
-					// TODO: fix this
-					Label:     fmt.Sprintf("Auto-created by %s", addr1),
+					Sender:    addr1,
+					CodeID:      7,
+					Label:     "",
 					InitMsg:   jsonMsg,
 					InitFunds: sdk.NewCoins(sdk.NewInt64Coin("eth", 123)),
 				},
